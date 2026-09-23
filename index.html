@@ -1821,7 +1821,7 @@
 
     // Build photo — same priority as roster/squad: TM function first, then local faces
     var tmId = (typeof extractTmId === 'function') ? extractTmId(p.tm) : null;
-    var localBase = '/faces/' + encodeURIComponent(p.name);
+    var localBase = 'faces/' + encodeURIComponent(p.name);
     var ini2 = p.name.split(' ').filter(Boolean).map(function(w){return w[0];}).slice(0,2).join('').toUpperCase();
 
     // Try to load photo into preview thumb
@@ -1876,7 +1876,7 @@
     if (prev) prev.style.display = '';
 
     var tmId = (typeof extractTmId === 'function') ? extractTmId(p.tm) : null;
-    var localBase = '/faces/' + encodeURIComponent(p.name);
+    var localBase = 'faces/' + encodeURIComponent(p.name);
     var ini2 = p.name.split(' ').filter(Boolean).map(function(w){return w[0];}).slice(0,2).join('').toUpperCase();
 
     thumb.innerHTML = '';
@@ -3785,7 +3785,7 @@ async function fetchAllPlayerForms() {
 
   try {
     // player-form.json is regenerated every 6 hours by GitHub Actions
-    const res  = await fetch('/player-form.json');
+    const res  = await fetch('player-form.json');
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
 
@@ -4926,7 +4926,7 @@ const rosterFilter = { pos: '', status: '' };
 
 // Shared helper: build an <img> that falls back through webp → jpg → TM proxy → initials div
 function rosterImgHTML(p, tmId) {
-  const localBase = `/faces/${encodeURIComponent(p.name)}`;
+  const localBase = `faces/${encodeURIComponent(p.name)}`;
   const tmSrc     = tmId ? `/.netlify/functions/tm-photo?id=${tmId}` : '';
   const primary   = p.photoUrl || `${localBase}.webp`;
   const chain     = [localBase + '.png', localBase + '.jpg', tmSrc, '__initials__'].filter(Boolean);
@@ -5026,7 +5026,7 @@ function openPlayerModal(name) {
   imgEl.style.display = 'block';
 
   // Build onerror chain same as roster
-  const localBase = `/faces/${encodeURIComponent(p.name)}`;
+  const localBase = `faces/${encodeURIComponent(p.name)}`;
   const tmSrc = tmId ? `/.netlify/functions/tm-photo?id=${tmId}` : '';
   const chain = [localBase+'.png', localBase+'.jpg', tmSrc, '__initials__'].filter(Boolean);
   let ci = 0;
@@ -6281,7 +6281,7 @@ let poolFilter = 'ALL';
 // Photo helper: webp → png → jpg → initials, using a chained onerror like rosterImgHTML
 function luImgHTML(p, textSize) {
   if (!p) return '';
-  const localBase = `/faces/${encodeURIComponent(p.name)}`;
+  const localBase = `faces/${encodeURIComponent(p.name)}`;
   const primary   = p.photoUrl || `${localBase}.webp`;
   const chain     = [localBase + '.png', localBase + '.jpg', '__initials__'];
   const onerror   = `(function(el){var c=${JSON.stringify(chain)},i=0;el.onerror=function(){if(i>=c.length)return;var n=c[i++];if(n==='__initials__'){el.style.display='none';el.nextElementSibling.style.display='flex';}else el.src=n;};el.onerror();})(this)`;
