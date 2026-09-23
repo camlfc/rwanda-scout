@@ -1,0 +1,38 @@
+name: Update player form data
+
+on:
+  schedule:
+    # Every 6 hours — adjust to taste (min sensible is every 2h)
+    - cron: '0 */6 * * *'
+  # Also run whenever code is pushed (so a fresh deploy always has up-to-date data)
+  push:
+    branches: [main]
+  # Allow manual trigger from the Actions tab
+  workflow_dispatch:
+
+jobs:
+  fetch-form:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # needed to commit player-form.json back to the repo
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: pip install requests
+
+      - name: Fetch player form from Sofascore
+        run: python scripts/fetch_form.py
+
+      - name: Commit updated player-form.json
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: 'chore: update player form data [skip ci]'
+          file_pattern: 'player-form.json'
