@@ -2,19 +2,17 @@ name: Update player form data
 
 on:
   schedule:
-    # Every 6 hours — adjust to taste (min sensible is every 2h)
-    - cron: '0 */6 * * *'
-  # Also run whenever code is pushed (so a fresh deploy always has up-to-date data)
+    - cron: '0 6 * * *'
   push:
     branches: [main]
-  # Allow manual trigger from the Actions tab
   workflow_dispatch:
 
 jobs:
   fetch-form:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
-      contents: write   # needed to commit player-form.json back to the repo
+      contents: write
 
     steps:
       - name: Checkout repo
@@ -26,13 +24,13 @@ jobs:
           python-version: '3.12'
 
       - name: Install dependencies
-        run: pip install requests
+        run: pip install ScraperFC
 
-      - name: Fetch player form from Sofascore
+      - name: Fetch player form via Sofascore (botasaurus)
         run: python scripts/fetch_form.py
 
-      - name: Commit updated player-form.json
+      - name: Commit updated data files
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
           commit_message: 'chore: update player form data [skip ci]'
-          file_pattern: 'player-form.json'
+          file_pattern: 'player-form.json scripts/team_ids.json scripts/lineups_cache.json'
