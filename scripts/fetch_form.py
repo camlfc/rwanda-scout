@@ -1,38 +1,31 @@
 #!/usr/bin/env python3
 """
-fetch_form.py — run by GitHub Actions once per day.
+fetch_form.py — fetches club form + lineup data from API-Football.
 
-Uses ScraperFC botasaurus browser to call Sofascore API through real headless
-Chrome, bypassing the 403 blocks datacenter IPs get from plain requests.
-No API key required.
+API-Football works from residential IPs and has full lineup data.
+Free tier: 100 requests/day.  Caching means subsequent runs are cheap.
 
 Caching:
-  scripts/team_ids.json      — club name -> Sofascore team ID  (never re-fetched)
-  scripts/lineups_cache.json — fixture_id -> playerMap         (never re-fetched)
+  scripts/team_ids.json      — club name -> API-Football team ID  (never re-fetched)
+  scripts/lineups_cache.json — fixture_id -> playerMap            (never re-fetched)
 """
 
 import json
+import os
 import time
 import unicodedata
 import re
 from pathlib import Path
 from urllib.parse import urlencode
-
-try:
-    from ScraperFC.utils import botasaurus_browser_get_json  # type: ignore
-    _USE_BROWSER = True
-    print("botasaurus browser available - using Chrome for Sofascore requests")
-except ImportError:
-    import requests as _requests
-    _USE_BROWSER = False
-    print("botasaurus not available - falling back to plain requests (may get 403s)")
+import requests
 
 REPO_ROOT      = Path(__file__).parent.parent
 OUTPUT_FILE    = REPO_ROOT / "player-form.json"
 TEAM_IDS_FILE  = Path(__file__).parent / "team_ids.json"
 LINEUPS_FILE   = Path(__file__).parent / "lineups_cache.json"
 
-SS_BASE = "https://api.sofascore.com/api/v1"
+API_BASE = "https://v3.football.api-sports.io"
+API_KEY  = os.environ.get("APIFOOTBALL_KEY", "604d0a4e44ea0333c4695e9095e73688")
 
 SKIP_LEAGUES = {
     "Rwanda Premier League",
@@ -40,36 +33,33 @@ SKIP_LEAGUES = {
     "Luxembourg National Division",
 }
 
-_SS_HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-    "Accept": "application/json, text/plain, */*",
-    "Accept-Language": "en-US,en;q=0.9",
-    "Referer": "https://www.sofascore.com/",
-    "Origin": "https://www.sofascore.com",
-    "sec-fetch-dest": "empty",
-    "sec-fetch-mode": "cors",
-    "sec-fetch-site": "same-site",
+_HEADERS = {
+    "x-apisports-key": API_KEY,
 }
 
-def ss_get(path, params=None):
-    url = f"{SS_BASE}{path}"
+
+def api_get(path, params=None):
+    url = f"{API_BASE}{path}"
     if params:
         url += "?" + urlencode(params)
     try:
-        if _USE_BROWSER:
-            return botasaurus_browser_get_json(url)
-        else:
-            r = _requests.get(url, headers=_SS_HEADERS, timeout=15)
-            return r.json() if r.status_code == 200 else None
+        r = requests.get(url, headers=_HEADERS, timeout=20)
+        if r.status_code == 429:
+            print("  rate limited — sleeping 60s")
+            time.sleep(60)
+            r = requests.get(url, headers=_HEADERS, timeout=20)
+        return r.json() if r.status_code == 200 else None
     except Exception as e:
         print(f"  ERR {path}: {e}")
         return None
+
 
 def norm_name(name):
     n = unicodedata.normalize("NFD", name.lower())
     n = "".join(c for c in n if unicodedata.category(c) != "Mn")
     n = re.sub(r"[^a-z0-9 ]", "", n).strip()
     return re.sub(r"\s+", " ", n)
+
 
 def load_json(path):
     if path.exists():
@@ -79,95 +69,124 @@ def load_json(path):
             pass
     return {}
 
+
 def get_team_id(club, team_ids):
     if club in team_ids:
         return team_ids[club]
-    data = ss_get("/search/all", {"q": club, "page": 0})
-    if not data:
+    data = api_get("/teams", {"search": club})
+    if not data or not data.get("response"):
+        print(f"  no team found for '{club}'")
         return None
-    team = next(
-        (r for r in (data.get("results") or [])
-         if r.get("type") == "team"
-         and r.get("entity", {}).get("sport", {}).get("slug") == "football"),
-        None,
+    # Pick best match by normalised name
+    cn = norm_name(club)
+    resp = data["response"]
+    match = next(
+        (r for r in resp if norm_name(r["team"]["name"]) == cn),
+        resp[0]  # fallback: first result
     )
-    if not team:
-        print(f"  no football team found for {club!r}")
-        return None
-    team_id   = team["entity"]["id"]
-    team_name = team["entity"].get("name", club)
+    team_id   = match["team"]["id"]
+    team_name = match["team"]["name"]
     print(f"  found: {team_name} (id={team_id})")
     team_ids[club] = team_id
     return team_id
+
 
 def get_lineup(fixture_id, team_id, lineups_cache):
     key = str(fixture_id)
     if key in lineups_cache:
         cached = lineups_cache[key]
         return cached if cached else None
-    lu_data = ss_get(f"/event/{fixture_id}/lineups")
-    if not lu_data:
+
+    data = api_get("/fixtures/lineups", {"fixture": fixture_id})
+    if not data or not data.get("response"):
         lineups_cache[key] = None
         return None
-    home_id = (lu_data.get("home") or {}).get("team", {}).get("id")
-    side = lu_data.get("home" if home_id == team_id else "away") or {}
-    players = side.get("players") or []
-    if not players:
+
+    # Find our team's lineup
+    side = next(
+        (r for r in data["response"] if r["team"]["id"] == team_id),
+        None
+    )
+    if not side:
         lineups_cache[key] = None
         return None
+
     player_map = {}
-    for entry in players:
-        p    = entry.get("player") or {}
+    for entry in side.get("startXI") or []:
+        p = entry.get("player") or {}
         pid  = p.get("id")
         pnm  = norm_name(p.get("name", ""))
-        mins = (entry.get("statistics") or {}).get("minutesPlayed", 0)
-        if not entry.get("substitute"):
-            status = "S"
-        elif mins and mins > 0:
-            status = "s"
-        else:
-            status = "B"
-        if pnm: player_map[pnm]         = status
-        if pid: player_map[f"id:{pid}"] = status
-    lineups_cache[key] = player_map
-    return player_map
+        if pnm: player_map[pnm]         = "S"
+        if pid: player_map[f"id:{pid}"] = "S"
+
+    for entry in side.get("substitutes") or []:
+        p = entry.get("player") or {}
+        pid  = p.get("id")
+        pnm  = norm_name(p.get("name", ""))
+        # Mark as bench (B); we'd need events to know if they came on
+        if pnm: player_map[pnm]         = "B"
+        if pid: player_map[f"id:{pid}"] = "B"
+
+    lineups_cache[key] = player_map if player_map else None
+    return player_map if player_map else None
+
 
 def fetch_club_form(club, team_ids, lineups_cache):
     print(f"\n{club}")
     team_id = get_team_id(club, team_ids)
     if not team_id:
         return None
-    ev_data = ss_get(f"/team/{team_id}/events/last/0")
-    if not ev_data:
+
+    data = api_get("/fixtures", {"team": team_id, "last": 5})
+    if not data or not data.get("response"):
+        print(f"  no fixtures found")
         return None
-    last5 = [
-        e for e in (ev_data.get("events") or [])
-        if e.get("status", {}).get("type") == "finished"
-    ][-5:]
-    if not last5:
-        print(f"  no finished events")
+
+    fixtures_raw = data["response"]
+    if not fixtures_raw:
+        print(f"  no finished fixtures")
         return None
+
     fixtures = []
     has_any_lineup = False
-    for ev in last5:
-        ev_id   = ev["id"]
-        is_home = ev.get("homeTeam", {}).get("id") == team_id
-        gf = ev.get("homeScore" if is_home else "awayScore", {}).get("current")
-        ga = ev.get("awayScore" if is_home else "homeScore", {}).get("current")
-        result = ("W" if gf > ga else "L" if gf < ga else "D") if (gf is not None and ga is not None) else "?"
-        opp = ev.get("awayTeam" if is_home else "homeTeam", {}).get("name", "?")
-        ts  = ev.get("startTimestamp", 0)
-        player_map = get_lineup(ev_id, team_id, lineups_cache) or {}
+
+    for fx in fixtures_raw:
+        fix_id  = fx["fixture"]["id"]
+        is_home = fx["teams"]["home"]["id"] == team_id
+        gf = fx["goals"]["home"] if is_home else fx["goals"]["away"]
+        ga = fx["goals"]["away"] if is_home else fx["goals"]["home"]
+
+        if gf is not None and ga is not None:
+            result = "W" if gf > ga else ("L" if gf < ga else "D")
+        else:
+            result = "?"
+
+        opp = fx["teams"]["away"]["name"] if is_home else fx["teams"]["home"]["name"]
+        ts  = fx["fixture"].get("timestamp", 0)
+
+        player_map = get_lineup(fix_id, team_id, lineups_cache) or {}
         if player_map:
             has_any_lineup = True
-        fixtures.append({"fixtureId": ev_id, "date": str(ts), "opp": opp,
-                         "isHome": is_home, "result": result, "playerMap": player_map})
-        time.sleep(0.4)
-    if not has_any_lineup:
-        print(f"  no lineup data")
+
+        fixtures.append({
+            "fixtureId": fix_id,
+            "date":      str(ts),
+            "opp":       opp,
+            "isHome":    is_home,
+            "result":    result,
+            "playerMap": player_map,
+        })
+        time.sleep(0.5)
+
+    if not fixtures:
         return None
+
+    if not has_any_lineup:
+        print(f"  no lineup data (may not be available yet)")
+
     print(f"  stored {len(fixtures)} fixtures")
-    return {"teamId": team_id, "source": "sofascore", "fixtures": fixtures}
+    return {"teamId": team_id, "source": "api-football", "fixtures": fixtures}
+
 
 CLUBS = [
     ("Zira FC",                          "Azerbaijan Premier League"),
@@ -230,37 +249,52 @@ CLUBS = [
     ("Police FC",                        "Rwanda Premier League"),
 ]
 
+
 def main():
     team_ids      = load_json(TEAM_IDS_FILE)
     lineups_cache = load_json(LINEUPS_FILE)
+
     existing_clubs = {}
     if OUTPUT_FILE.exists():
         try:
             existing_clubs = json.loads(OUTPUT_FILE.read_text()).get("clubs", {})
         except Exception:
             pass
+
     result = {}
     seen   = set()
+
     for club, league in CLUBS:
         if club in seen:
             continue
         seen.add(club)
+
         if league in SKIP_LEAGUES:
             print(f"skipping {club} ({league})")
             result[club] = {"error": True}
             continue
+
         entry = fetch_club_form(club, team_ids, lineups_cache)
         if entry:
             result[club] = entry
         elif club in existing_clubs and not existing_clubs[club].get("error"):
             result[club] = existing_clubs[club]
             print(f"  using cached data")
+
         time.sleep(0.5)
+
     TEAM_IDS_FILE.write_text(json.dumps(team_ids, indent=2))
     LINEUPS_FILE.write_text(json.dumps(lineups_cache, indent=2))
-    OUTPUT_FILE.write_text(json.dumps({"ts": int(time.time() * 1000), "clubs": result}, indent=2))
-    clubs_with_data = sum(1 for v in result.values() if v and not v.get("error") and v.get("fixtures"))
+    OUTPUT_FILE.write_text(
+        json.dumps({"ts": int(time.time() * 1000), "clubs": result}, indent=2)
+    )
+
+    clubs_with_data = sum(
+        1 for v in result.values()
+        if v and not v.get("error") and v.get("fixtures")
+    )
     print(f"\nDone: {clubs_with_data} clubs with data")
+
 
 if __name__ == "__main__":
     main()
