@@ -1,5 +1,5 @@
 {
-  "ts": 1790255561836,
+  "ts": 1790333080763,
   "clubs": {
     "Zira FC": {
       "teamId": 648,
@@ -1375,6 +1375,14 @@
       "source": "api-football",
       "fixtures": [
         {
+          "fixtureId": 1621614,
+          "date": "1790270100",
+          "opp": "Maccabi Ashdod",
+          "isHome": true,
+          "result": "D",
+          "playerMap": {}
+        },
+        {
           "fixtureId": 1621607,
           "date": "1789662600",
           "opp": "Kfar Saba 1928",
@@ -1404,14 +1412,6 @@
           "opp": "Maccabi Kabilio Jaffa",
           "isHome": false,
           "result": "L",
-          "playerMap": {}
-        },
-        {
-          "fixtureId": 1541913,
-          "date": "1779206400",
-          "opp": "Hapoel Acre",
-          "isHome": false,
-          "result": "D",
           "playerMap": {}
         }
       ]
@@ -3690,14 +3690,6 @@
       "source": "api-football",
       "fixtures": [
         {
-          "fixtureId": 1611767,
-          "date": "1790157600",
-          "opp": "Shakhtar Donetsk U19",
-          "isHome": false,
-          "result": "?",
-          "playerMap": {}
-        },
-        {
           "fixtureId": 1611874,
           "date": "1789552800",
           "opp": "SK Metalurh U19",
@@ -3727,6 +3719,14 @@
           "opp": "Rukh Vynnyky U19",
           "isHome": false,
           "result": "L",
+          "playerMap": {}
+        },
+        {
+          "fixtureId": 1611742,
+          "date": "1787133600",
+          "opp": "Obolon' Kyiv U19",
+          "isHome": true,
+          "result": "D",
           "playerMap": {}
         }
       ]
